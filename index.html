@@ -1,0 +1,448 @@
+import React, { useState, useMemo } from 'react';
+import { ArrowDown, Dna, GitMerge, RefreshCw, Shuffle } from 'lucide-react';
+
+/**
+ * マップベースクローニング学習用SPA (High Recombination View)
+ * 2n=4 モデルで、染色体内の乗換え(Crossing over)と独立の法則を可視化
+ */
+
+// 色定義
+const COLORS = {
+  mutant: {
+    base: 'bg-rose-500',
+    light: 'bg-rose-100',
+    border: 'border-rose-200',
+    text: 'text-rose-700',
+    svg: '#f43f5e'
+  },
+  wild: {
+    base: 'bg-blue-500',
+    light: 'bg-blue-100',
+    border: 'border-blue-200',
+    text: 'text-blue-700',
+    svg: '#3b82f6'
+  }
+};
+
+type Type = 'mutant' | 'wild';
+interface ChromosomeState {
+  top: Type;    // 遺伝子座周辺
+  bottom: Type; // マーカー座周辺
+}
+
+// 1本の染色体を描画するコンポーネント (組換え対応)
+const SingleChromosome = ({ 
+  state, // { top, bottom }
+  height = 80, 
+  width = 12, 
+  hasGene = false 
+}: { state: ChromosomeState, height?: number, width?: number, hasGene?: boolean }) => {
+  
+  const topColor = state.top === 'mutant' ? COLORS.mutant.svg : COLORS.wild.svg;
+  const bottomColor = state.bottom === 'mutant' ? COLORS.mutant.svg : COLORS.wild.svg;
+  const isRecombinant = state.top !== state.bottom;
+
+  return (
+    <div className="flex flex-col items-center mx-0.5 relative group">
+      <svg width={width} height={height} className="drop-shadow-sm overflow-visible">
+        {/* 上部 (Gene side) */}
+        <path 
+          d={`M0,${width/2} L0,${height/2} L${width},${height/2} L${width},${width/2} A${width/2},${width/2} 0 0 0 0,${width/2}`} 
+          fill={topColor} 
+        />
+        {/* 下部 (Marker side) */}
+        <path 
+          d={`M0,${height/2} L0,${height - width/2} A${width/2},${width/2} 0 0 0 ${width},${height - width/2} L${width},${height/2} Z`} 
+          fill={bottomColor} 
+        />
+        
+        {/* 組換え地点の継ぎ目 (Recombinantのみ強調) */}
+        {isRecombinant && (
+          <rect x="0" y={height/2 - 1} width={width} height="2" fill="rgba(255,255,255,0.5)" />
+        )}
+
+        {hasGene && (
+          <g transform={`translate(0, ${height * 0.25})`}>
+            <line x1="-2" y1="0" x2={width + 2} y2="0" stroke="white" strokeWidth="2" />
+          </g>
+        )}
+      </svg>
+      {/* Tooltip for recombinant */}
+      {isRecombinant && (
+        <div className="absolute -top-6 left-1/2 -translate-x-1/2 bg-yellow-400 text-yellow-900 text-[9px] px-1 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none font-bold">
+          乗換えあり
+        </div>
+      )}
+    </div>
+  );
+};
+
+// 1つの細胞（個体）内の染色体セット (2n=4)
+const CellChromosomes = ({ 
+  pair1, // [ChrState, ChrState] for Chr 1 (Gene & Linked)
+  pair2, // [ChrState, ChrState] for Chr 2 (Independent)
+  scale = 1.0,
+  showLabel = true
+}) => {
+  return (
+    <div className="flex gap-3 p-2 bg-white/60 rounded-lg border border-slate-200 shadow-sm transition-transform hover:scale-105" style={{ transform: `scale(${scale})` }}>
+      {/* 第1染色体ペア (連鎖・乗換えあり) */}
+      <div className="flex flex-col items-center">
+        <div className="flex gap-1.5">
+          <SingleChromosome state={pair1[0]} height={80} hasGene={true} />
+          <SingleChromosome state={pair1[1]} height={80} hasGene={true} />
+        </div>
+        {showLabel && <span className="text-[9px] text-slate-500 font-bold mt-1">Chr 1 (連鎖)</span>}
+      </div>
+
+      {/* 第2染色体ペア (独立・組換えなしとして描画) */}
+      <div className="flex flex-col items-center">
+        <div className="flex gap-1.5">
+          <SingleChromosome state={pair2[0]} height={50} hasGene={false} />
+          <SingleChromosome state={pair2[1]} height={50} hasGene={false} />
+        </div>
+        {showLabel && <span className="text-[9px] text-slate-500 font-bold mt-1">Chr 2 (独立)</span>}
+      </div>
+    </div>
+  );
+};
+
+// 配偶子 (n=2)
+const Gamete = ({ chr1, chr2, label = "" }) => {
+  const isRecombinant = chr1.top !== chr1.bottom;
+  
+  return (
+    <div className={`
+      relative flex flex-col items-center justify-center rounded-full w-20 h-20 border-2 
+      ${isRecombinant ? 'bg-yellow-50 border-yellow-400 border-dashed' : 'bg-white border-slate-200 border-dashed'}
+      shadow-sm transition-all hover:shadow-md
+    `}>
+      <div className="flex gap-2 items-end">
+        <SingleChromosome state={chr1} height={45} width={10} hasGene={true} />
+        <SingleChromosome state={chr2} height={30} width={10} hasGene={false} />
+      </div>
+      {label && <span className="absolute -bottom-6 text-[10px] font-medium text-slate-500 whitespace-nowrap">{label}</span>}
+      {isRecombinant && (
+        <div className="absolute -top-2 -right-2 bg-yellow-400 text-yellow-900 text-[9px] font-bold px-1.5 py-0.5 rounded-full shadow-sm">
+          乗換
+        </div>
+      )}
+    </div>
+  );
+};
+
+export default function MapBasedCloningHighRecomb() {
+  const [f2Seed, setF2Seed] = useState(0);
+
+  // 配偶子生成ロジック (Chr1で乗換え発生)
+  const generateGamete = () => {
+    // 1. Gene座 (Chr1 Top) を決める (1:1)
+    const geneType: Type = Math.random() < 0.5 ? 'mutant' : 'wild';
+    
+    // 2. Chr1での乗換え判定 (高めの確率で発生させて可視化: 40%)
+    const crossover = Math.random() < 0.4;
+    const chr1Bottom: Type = crossover 
+      ? (geneType === 'mutant' ? 'wild' : 'mutant') // 乗換え：色が反転
+      : geneType;                                   // 親型：色は同じ
+      
+    // 3. Chr2 (独立) を決める (1:1)
+    const chr2Type: Type = Math.random() < 0.5 ? 'mutant' : 'wild';
+
+    return {
+      chr1: { top: geneType, bottom: chr1Bottom },
+      chr2: { top: chr2Type, bottom: chr2Type } // Chr2は便宜上単色とする
+    };
+  };
+
+  // F2生成ロジック (変異型ホモ多めバイアス)
+  const f2Individuals = useMemo(() => {
+    const individuals = [];
+    const targetCount = 8;
+    // 少なくとも4体は変異型ホモ(m/m)になるようにする
+    const guaranteedMutants = 4;
+
+    for (let i = 0; i < targetCount; i++) {
+      let g1, g2;
+      
+      // 前半は変異型ホモ(m/m)になるよう配偶子を選抜・生成
+      if (i < guaranteedMutants) {
+        // Gene座がmutantになる配偶子を強制生成 (乗換えはランダム)
+        const makeMutantGamete = () => {
+          let g = generateGamete();
+          while (g.chr1.top !== 'mutant') { g = generateGamete(); }
+          return g;
+        };
+        g1 = makeMutantGamete();
+        g2 = makeMutantGamete();
+      } else {
+        // 後半は完全ランダム
+        g1 = generateGamete();
+        g2 = generateGamete();
+      }
+
+      individuals.push({
+        id: i,
+        pair1: [g1.chr1, g2.chr1], // Chr1ペア
+        pair2: [g1.chr2, g2.chr2]  // Chr2ペア
+      });
+    }
+    
+    // 表示順をシャッフル (バイアスを感じさせないため)
+    return individuals.sort(() => Math.random() - 0.5);
+  }, [f2Seed]);
+
+  return (
+    <div className="min-h-screen bg-slate-50 text-slate-800 font-sans pb-32">
+      
+      {/* Header */}
+      <header className="bg-slate-900 text-white p-6 shadow-md sticky top-0 z-20">
+        <div className="max-w-4xl mx-auto flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="bg-blue-600 p-2 rounded-lg">
+              <Dna className="w-5 h-5 text-white" />
+            </div>
+            <div>
+              <h1 className="text-lg font-bold leading-tight">マップベースクローニング原理</h1>
+              <p className="text-xs text-slate-400">乗換え(Crossover) と 独立の法則</p>
+            </div>
+          </div>
+          <button 
+            onClick={() => setF2Seed(s => s + 1)}
+            className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-500 px-4 py-2 rounded-lg text-xs font-bold transition-colors shadow-lg active:transform active:scale-95"
+          >
+            <RefreshCw className="w-4 h-4" />
+            F2 再交配
+          </button>
+        </div>
+      </header>
+
+      <main className="max-w-4xl mx-auto p-4 space-y-16">
+
+        {/* --- P GENERATION --- */}
+        <section className="relative pt-6">
+          <div className="absolute left-0 top-0 bottom-0 w-0.5 bg-slate-300 -ml-4 md:-ml-8 hidden md:block opacity-50"></div>
+          
+          <div className="flex items-center gap-2 mb-6">
+            <span className="bg-slate-800 text-white w-8 h-8 flex items-center justify-center rounded-full text-sm font-bold shadow-md z-10">P</span>
+            <h2 className="text-lg font-bold text-slate-700">親世代 (純系)</h2>
+          </div>
+
+          <div className="flex justify-around items-center bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
+            {/* Mutant Parent */}
+            <div className="flex flex-col items-center gap-2">
+              <span className="font-bold text-rose-600 bg-rose-50 px-3 py-1 rounded-full text-sm">変異型親</span>
+              <CellChromosomes 
+                pair1={[{top:'mutant', bottom:'mutant'}, {top:'mutant', bottom:'mutant'}]} 
+                pair2={[{top:'mutant', bottom:'mutant'}, {top:'mutant', bottom:'mutant'}]} 
+              />
+              <div className="text-xs text-center text-slate-400 font-mono mt-1">Gene: m/m</div>
+            </div>
+
+            <div className="flex flex-col items-center">
+              <div className="text-xl text-slate-300 font-light mb-1">交配</div>
+              <ArrowDown className="text-slate-300 w-4 h-4" />
+            </div>
+
+            {/* Wild Parent */}
+            <div className="flex flex-col items-center gap-2">
+              <span className="font-bold text-blue-600 bg-blue-50 px-3 py-1 rounded-full text-sm">野生型親</span>
+              <CellChromosomes 
+                pair1={[{top:'wild', bottom:'wild'}, {top:'wild', bottom:'wild'}]} 
+                pair2={[{top:'wild', bottom:'wild'}, {top:'wild', bottom:'wild'}]} 
+              />
+              <div className="text-xs text-center text-slate-400 font-mono mt-1">Gene: +/+</div>
+            </div>
+          </div>
+        </section>
+
+        {/* --- F1 GENERATION & GAMETES --- */}
+        <section className="relative">
+           <div className="absolute left-0 top-0 bottom-0 w-0.5 bg-slate-300 -ml-4 md:-ml-8 hidden md:block opacity-50"></div>
+           
+           <div className="flex justify-center -mt-10 mb-8">
+             <div className="bg-slate-50 p-2 rounded-full border border-slate-200">
+                <ArrowDown className="w-6 h-6 text-slate-400" />
+             </div>
+           </div>
+
+          <div className="flex items-center gap-2 mb-4">
+            <span className="bg-slate-800 text-white w-8 h-8 flex items-center justify-center rounded-full text-sm font-bold shadow-md z-10">F1</span>
+            <h2 className="text-lg font-bold text-slate-700">F1世代と配偶子形成</h2>
+          </div>
+
+          <div className="grid md:grid-cols-5 gap-8 items-center">
+            {/* F1 Individual */}
+            <div className="md:col-span-2 flex flex-col items-center bg-purple-50 p-6 rounded-2xl border border-purple-200 shadow-sm">
+              <span className="font-bold text-purple-700 mb-4 bg-purple-100 px-3 py-1 rounded-full text-sm">F1 個体</span>
+              <CellChromosomes 
+                pair1={[{top:'mutant', bottom:'mutant'}, {top:'wild', bottom:'wild'}]} 
+                pair2={[{top:'mutant', bottom:'mutant'}, {top:'wild', bottom:'wild'}]} 
+                scale={1.2}
+              />
+              <div className="mt-4 text-xs text-purple-800 bg-white/50 p-3 rounded-lg w-full text-center leading-relaxed">
+                染色体ペアが揃い、<br/>
+                減数分裂時に<strong>乗換え</strong>が発生します。
+              </div>
+            </div>
+
+            <div className="hidden md:flex justify-center">
+               <Shuffle className="w-8 h-8 text-slate-300" />
+            </div>
+
+            {/* F1 Gametes (Showing Crossovers) */}
+            <div className="md:col-span-2">
+              <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-5">
+                <h3 className="font-bold text-yellow-800 mb-3 flex items-center gap-2 text-sm">
+                  <GitMerge className="w-4 h-4" />
+                  生成される配偶子（多様なパターン）
+                </h3>
+                
+                <div className="grid grid-cols-2 gap-4 justify-items-center">
+                  <Gamete 
+                    chr1={{top:'mutant', bottom:'mutant'}} 
+                    chr2={{top:'wild', bottom:'wild'}} 
+                    label="親型 (Parental)" 
+                  />
+                  <Gamete 
+                    chr1={{top:'mutant', bottom:'wild'}} 
+                    chr2={{top:'mutant', bottom:'mutant'}} 
+                    label="乗換え型 (Recombinant)" 
+                  />
+                  <Gamete 
+                    chr1={{top:'wild', bottom:'mutant'}} 
+                    chr2={{top:'wild', bottom:'wild'}} 
+                    label="乗換え型 (Recombinant)" 
+                  />
+                  <Gamete 
+                    chr1={{top:'wild', bottom:'wild'}} 
+                    chr2={{top:'mutant', bottom:'mutant'}} 
+                    label="親型 (Parental)" 
+                  />
+                </div>
+                <p className="text-[10px] text-yellow-700 mt-4 text-center">
+                  ※ Chr1（左）で赤/青が混ざっているのが「乗換え」。<br/>
+                  ※ Chr2（右）は独立してランダムに混ざります。
+                </p>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        {/* --- F2 GENERATION --- */}
+        <section className="relative">
+          <div className="absolute left-0 top-0 bottom-0 w-0.5 bg-slate-300 -ml-4 md:-ml-8 hidden md:block opacity-50"></div>
+
+          <div className="flex justify-center -mt-10 mb-8">
+             <div className="bg-slate-50 p-2 rounded-full border border-slate-200">
+                <ArrowDown className="w-6 h-6 text-slate-400" />
+             </div>
+           </div>
+
+          <div className="flex items-center gap-2 mb-4">
+            <span className="bg-slate-800 text-white w-8 h-8 flex items-center justify-center rounded-full text-sm font-bold shadow-md z-10">F2</span>
+            <div className="flex-1">
+              <h2 className="text-lg font-bold text-slate-700">F2 分離集団</h2>
+              <p className="text-xs text-slate-500">乗換え後の染色体がモザイク状に組み合わさる</p>
+            </div>
+          </div>
+
+          <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-xl">
+            <div className="mb-4 flex items-center gap-2 text-sm text-slate-500 bg-slate-100 p-2 rounded-lg inline-block">
+              <span className="w-3 h-3 bg-rose-500 rounded-full inline-block"></span>
+              表現型が「変異型 (m/m)」の個体を多めに表示しています
+            </div>
+
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
+              {f2Individuals.map((ind) => {
+                // 変異型表現型か？ (Chr1 Topが両方mutant)
+                const isMutantPhenotype = ind.pair1[0].top === 'mutant' && ind.pair1[1].top === 'mutant';
+                
+                // Chr1に組換えが含まれているか？
+                const hasRecombinationChr1 = (ind.pair1[0].top !== ind.pair1[0].bottom) || (ind.pair1[1].top !== ind.pair1[1].bottom);
+
+                return (
+                  <div 
+                    key={ind.id} 
+                    className={`
+                      relative flex flex-col items-center p-3 rounded-xl border-2 transition-all duration-500
+                      ${isMutantPhenotype 
+                        ? 'border-rose-400 bg-rose-50 shadow-md transform scale-[1.02]' 
+                        : 'border-slate-100 bg-slate-50 opacity-70 hover:opacity-100'
+                      }
+                    `}
+                  >
+                    {/* Badge */}
+                    {isMutantPhenotype && (
+                      <div className="absolute -top-2.5 bg-rose-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full z-10 shadow-sm">
+                        変異型 (選抜対象)
+                      </div>
+                    )}
+
+                    {/* Chromosomes */}
+                    <CellChromosomes 
+                      pair1={ind.pair1} 
+                      pair2={ind.pair2} 
+                      scale={0.85}
+                      showLabel={false}
+                    />
+
+                    {/* Info */}
+                    <div className="mt-2 w-full text-center space-y-1">
+                      <div className="text-[10px] font-bold text-slate-600 border-b border-slate-200/50 pb-1 mx-2">
+                        {isMutantPhenotype ? '表現型: 変異' : '表現型: 野生'}
+                      </div>
+                      
+                      {/* Analysis Text */}
+                      {isMutantPhenotype ? (
+                        <div className="text-[9px] leading-tight pt-1">
+                          {hasRecombinationChr1 ? (
+                            <span className="text-yellow-700 font-bold bg-yellow-100 px-1 rounded">
+                              ★ 組換え体 (重要)
+                            </span>
+                          ) : (
+                            <span className="text-rose-400">親型パターン</span>
+                          )}
+                          <div className="text-slate-400 mt-1 scale-90">
+                            Chr2はランダム
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="text-[9px] text-slate-300 pt-1">選抜対象外</div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+          
+          <div className="mt-8 bg-slate-800 text-slate-300 p-4 rounded-xl text-sm leading-relaxed">
+            <h4 className="text-white font-bold mb-2 flex items-center gap-2">
+              <RefreshCw className="w-4 h-4 text-indigo-400" />
+              解説：なぜ「変異型かつ組換え体」を探すのか？
+            </h4>
+            <ul className="list-disc list-inside space-y-1 marker:text-indigo-400">
+              <li>
+                上の図で <span className="text-rose-400 font-bold">ピンクの枠（変異型）</span> に注目してください。
+              </li>
+              <li>
+                変異型を選んでも、<span className="text-slate-400 font-bold">右側のChr2</span> は赤だったり青だったりバラバラです（独立）。
+              </li>
+              <li>
+                しかし、<span className="text-slate-200 font-bold">左側のChr1（遺伝子がある染色体）</span> は、ほとんどが「上も下も赤（親型）」です。
+              </li>
+              <li>
+                その中で稀に <span className="bg-yellow-500/20 text-yellow-200 font-bold px-1 rounded">★組換え体（上が赤、下が青）</span> が見つかります。
+              </li>
+              <li>
+                この組換え体が出現する頻度を調べることで、遺伝子とマーカーの距離（地図）を作ることができます。
+              </li>
+            </ul>
+          </div>
+
+        </section>
+
+      </main>
+    </div>
+  );
+}
